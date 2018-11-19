@@ -26,7 +26,9 @@ import (
 	"go.opencensus.io/exporter/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.uber.org/zap"
-	monitoredrespb "google.golang.org/genproto/googleapis/api/monitoredres"
+
+	// monitoredrespb "google.golang.org/genproto/googleapis/api/monitoredres"
+	"contrib.go.opencensus.io/exporter/stackdriver/monitoredresource"
 )
 
 var (
@@ -66,12 +68,22 @@ func newMetricsExporter(config *metricsConfig, logger *zap.SugaredLogger) error 
 }
 
 func newStackdriverExporter(config *metricsConfig, logger *zap.SugaredLogger) (view.Exporter, error) {
+	gkeContainer := monitoredresource.GKEContainer{
+		ProjectID:     "yaotest-knative-1",
+		InstanceID:    "instance1",
+		ClusterName:   "cluster1",
+		ContainerName: "container1",
+		NamespaceID:   "testNamespace1",
+		PodID:         "pod1",
+		Zone:          "us-central1-a",
+	}
 	e, err := stackdriver.NewExporter(stackdriver.Options{
 		ProjectID:    config.stackdriverProjectID,
 		MetricPrefix: config.domain + "/" + config.component,
-		Resource: &monitoredrespb.MonitoredResource{
-			Type: "global",
-		},
+		// Resource: &monitoredrespb.MonitoredResource{
+		// 	Type: "global",
+		// },
+		MonitoredResource:       &gkeContainer,
 		DefaultMonitoringLabels: &stackdriver.Labels{},
 	})
 	if err != nil {
