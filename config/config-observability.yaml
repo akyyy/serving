@@ -89,8 +89,8 @@ data:
   # It defaults to prometheus. If this is stackdriver, the metrics will be sent
   # to stackdriver. "prometheus" and "stackdriver" are supported. This field 
   # is required.
-  # metrics.backend-destination: "prometheus"
-  metrics.backend-destination: "stackdriver"
+  metrics.backend-destination: "prometheus"
+  # metrics.backend-destination: "stackdriver"
 
   # metrics.stackdriver-project-id field specifies the stackdriver project ID. This
   # field is optional. When running on GKE, application default credentials will be
