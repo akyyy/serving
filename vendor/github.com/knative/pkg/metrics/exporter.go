@@ -26,6 +26,7 @@ import (
 	"contrib.go.opencensus.io/exporter/stackdriver/monitoredresource"
 	"go.opencensus.io/exporter/prometheus"
 	"go.opencensus.io/stats/view"
+	"go.opencensus.io/tag"
 	"go.uber.org/zap"
 	// monitoredrespb "google.golang.org/genproto/googleapis/api/monitoredres"
 )
@@ -66,8 +67,16 @@ func newMetricsExporter(config *metricsConfig, logger *zap.SugaredLogger) error 
 	return nil
 }
 
-func newStackdriverExporter(config *metricsConfig, logger *zap.SugaredLogger) (view.Exporter, error) {
-	gkeContainer := monitoredresource.GKEContainer{
+func getMonitoredResource(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
+	// var newTags []tag.Tag
+	// for _, t := range tags {
+	// 	v := vb.ReadValue()
+	// 	if v != nil {
+	// 		newTags = append(newTags, tag.Tag{Key: t, Value: string(v)})
+	// 	}
+	// }
+
+	gkeContainer := &monitoredresource.GKEContainer{
 		ProjectID:     "yaotest-knative-1",
 		InstanceID:    "instance1",
 		ClusterName:   "cluster1",
@@ -76,13 +85,30 @@ func newStackdriverExporter(config *metricsConfig, logger *zap.SugaredLogger) (v
 		PodID:         "pod1",
 		Zone:          "us-central1-a",
 	}
+
+	return tags, gkeContainer
+}
+
+func newStackdriverExporter(config *metricsConfig, logger *zap.SugaredLogger) (view.Exporter, error) {
+	// gkeContainer := monitoredresource.GKEContainer{
+	// 	ProjectID:     "yaotest-knative-1",
+	// 	InstanceID:    "instance1",
+	// 	ClusterName:   "cluster1",
+	// 	ContainerName: "container1",
+	// 	NamespaceID:   "testNamespace1",
+	// 	PodID:         "pod1",
+	// 	Zone:          "us-central1-a",
+	// }
 	e, err := stackdriver.NewExporter(stackdriver.Options{
 		ProjectID:    config.stackdriverProjectID,
 		MetricPrefix: config.domain + "/" + config.component,
 		// Resource: &monitoredrespb.MonitoredResource{
 		// 	Type: "global",
 		// },
-		MonitoredResource:       &gkeContainer,
+
+		// MonitoredResource:       &gkeContainer,
+
+		GetMonitoredResource:    getMonitoredResource,
 		DefaultMonitoringLabels: &stackdriver.Labels{},
 	})
 	if err != nil {
