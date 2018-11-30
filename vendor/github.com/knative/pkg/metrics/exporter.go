@@ -24,6 +24,7 @@ import (
 
 	"contrib.go.opencensus.io/exporter/stackdriver"
 	"contrib.go.opencensus.io/exporter/stackdriver/monitoredresource"
+	"github.com/knative/pkg/metrics/metricskey"
 	"go.opencensus.io/exporter/prometheus"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
@@ -35,7 +36,9 @@ var (
 	curMetricsExporter view.Exporter
 	curMetricsConfig   *metricsConfig
 	curPromSrv         *http.Server
-	metricsMux         sync.Mutex
+	//	curGcpMetadata     *gcpMetadata
+	getMonitoredResourceFunc func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface)
+	metricsMux               sync.Mutex
 )
 
 // newMetricsExporter gets a metrics exporter based on the config.
@@ -53,6 +56,8 @@ func newMetricsExporter(config *metricsConfig, logger *zap.SugaredLogger) error 
 	switch config.backendDestination {
 	case Stackdriver:
 		e, err = newStackdriverExporter(config, logger)
+		// Set getMonitoredResourceFunc
+		setMonitoredResourceFunc(config)
 	case Prometheus:
 		e, err = newPrometheusExporter(config, logger)
 	default:
@@ -67,38 +72,49 @@ func newMetricsExporter(config *metricsConfig, logger *zap.SugaredLogger) error 
 	return nil
 }
 
-func getMonitoredResource(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
+func getKnativeRevisionMonitoredResource(gm *gcpMetadata) func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
 	// var newTags []tag.Tag
 	// for _, t := range tags {
-	// 	v := vb.ReadValue()
-	// 	if v != nil {
+	// 	v := vb.ReadValue()	// 	if v != nil {
 	// 		newTags = append(newTags, tag.Tag{Key: t, Value: string(v)})
 	// 	}
 	// }
 
-	gkeContainer := &monitoredresource.GKEContainer{
-		ProjectID:     "yaotest-knative-1",
-		InstanceID:    "instance1",
-		ClusterName:   "cluster1",
-		ContainerName: "container1",
-		NamespaceID:   "testNamespace1",
-		PodID:         "pod1",
-		Zone:          "us-central1-a",
-	}
+	return func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
+		// TODO: After knative_revision is onboarded, replace resource type gke_container.
+		gkeContainer := &monitoredresource.GKEContainer{
+			ProjectID:     gm.project,
+			ClusterName:   gm.cluster,
+			Zone:          gm.location,
+			NamespaceID:   "testNamespace1", // use this field for revision namespace
+			ContainerName: "container1",     // use this field for service name
+			InstanceID:    "instance1",      // use this field for configuration name
+			PodID:         "pod1",           // use this field for revision name
+		}
 
-	return tags, gkeContainer
+		// TODO: After knative_revision is onbaroded, use resource type knative_revision
+		// as follows
+		// kr := &KnativeRevision{
+		// 	Project:           gm.project,
+		// 	Location:          gm.location,
+		// 	ClusterName:       gm.cluster,
+		// 	NamespaceName:     "testNamespace",
+		// 	ServiceName:       "testService",
+		// 	ConfigurationName: "testConfig",
+		// 	RevisionName:      "testRev",
+		// }
+
+		return tags, gkeContainer
+	}
+}
+
+func getGlobalMonitoredResource() func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
+	return func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
+		return tags, &Global{}
+	}
 }
 
 func newStackdriverExporter(config *metricsConfig, logger *zap.SugaredLogger) (view.Exporter, error) {
-	// gkeContainer := monitoredresource.GKEContainer{
-	// 	ProjectID:     "yaotest-knative-1",
-	// 	InstanceID:    "instance1",
-	// 	ClusterName:   "cluster1",
-	// 	ContainerName: "container1",
-	// 	NamespaceID:   "testNamespace1",
-	// 	PodID:         "pod1",
-	// 	Zone:          "us-central1-a",
-	// }
 	e, err := stackdriver.NewExporter(stackdriver.Options{
 		ProjectID:    config.stackdriverProjectID,
 		MetricPrefix: config.domain + "/" + config.component,
@@ -108,7 +124,7 @@ func newStackdriverExporter(config *metricsConfig, logger *zap.SugaredLogger) (v
 
 		// MonitoredResource:       &gkeContainer,
 
-		GetMonitoredResource:    getMonitoredResource,
+		GetMonitoredResource:    getMonitoredResourceFunc,
 		DefaultMonitoringLabels: &stackdriver.Labels{},
 	})
 	if err != nil {
@@ -146,6 +162,22 @@ func resetCurPromSrv() {
 	if curPromSrv != nil {
 		curPromSrv.Close()
 		curPromSrv = nil
+	}
+}
+
+func setMonitoredResourceFunc(config *metricsConfig) {
+	metricsMux.Lock()
+	defer metricsMux.Unlock()
+	if getMonitoredResourceFunc == nil {
+		gm := retrieveGCPMetadata()
+		fmt.Println("metrics prefix", config.domain+"/"+config.component)
+		if _, ok := metricskey.KnativeRevisionMetricsPrefixes[config.domain+"/"+config.component]; ok {
+			fmt.Println("path 1")
+			getMonitoredResourceFunc = getKnativeRevisionMonitoredResource(gm)
+		} else {
+			fmt.Println("path 2")
+			getMonitoredResourceFunc = getGlobalMonitoredResource()
+		}
 	}
 }
 

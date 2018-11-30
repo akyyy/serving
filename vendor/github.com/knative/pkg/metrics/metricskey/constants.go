@@ -59,4 +59,10 @@ var (
 	ResourceTypeToLabelsMap = map[string]map[string]struct{}{
 		ResourceTypeKnativeRevision: KnativeRevisionLabels,
 	}
+
+	// KnativeRevisionMetricsPrefixes stores a set of metrics prefixes that belong to resource type knative_revision
+	KnativeRevisionMetricsPrefixes = map[string]struct{}{
+		"knative.dev/serving/autoscaler": struct{}{},
+		"knative.dev/serving/activator":  struct{}{},
+	}
 )
