@@ -29,7 +29,6 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
 	"go.uber.org/zap"
-	// monitoredrespb "google.golang.org/genproto/googleapis/api/monitoredres"
 )
 
 var (
@@ -55,9 +54,9 @@ func newMetricsExporter(config *metricsConfig, logger *zap.SugaredLogger) error 
 	var e view.Exporter
 	switch config.backendDestination {
 	case Stackdriver:
-		e, err = newStackdriverExporter(config, logger)
 		// Set getMonitoredResourceFunc
 		setMonitoredResourceFunc(config)
+		e, err = newStackdriverExporter(config, logger)
 	case Prometheus:
 		e, err = newPrometheusExporter(config, logger)
 	default:
@@ -73,39 +72,56 @@ func newMetricsExporter(config *metricsConfig, logger *zap.SugaredLogger) error 
 }
 
 func getKnativeRevisionMonitoredResource(gm *gcpMetadata) func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
-	// var newTags []tag.Tag
-	// for _, t := range tags {
-	// 	v := vb.ReadValue()	// 	if v != nil {
-	// 		newTags = append(newTags, tag.Tag{Key: t, Value: string(v)})
-	// 	}
-	// }
-
 	return func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
 		// TODO: After knative_revision is onboarded, replace resource type gke_container.
+		// Before it is onboarded, stackdriver would reject metrics with resource type knative_revision.
 		gkeContainer := &monitoredresource.GKEContainer{
-			ProjectID:     gm.project,
-			ClusterName:   gm.cluster,
-			Zone:          gm.location,
-			NamespaceID:   "testNamespace1", // use this field for revision namespace
-			ContainerName: "container1",     // use this field for service name
-			InstanceID:    "instance1",      // use this field for configuration name
-			PodID:         "pod1",           // use this field for revision name
+			// The first three resource labels are from metadata.
+			ProjectID:   gm.project,
+			ClusterName: gm.cluster,
+			Zone:        gm.location,
+			// The rest resource labels are from metrics labels.
+			NamespaceID:   getResourceLabelValue(metricskey.LabelNamespaceName, tags),     // use this field for revision namespace
+			ContainerName: getResourceLabelValue(metricskey.LabelServiceName, tags),       // use this field for service name
+			InstanceID:    getResourceLabelValue(metricskey.LabelConfigurationName, tags), // use this field for configuration name
+			PodID:         getResourceLabelValue(metricskey.LabelRevisionName, tags),      // use this field for revision name
 		}
 
 		// TODO: After knative_revision is onbaroded, use resource type knative_revision
 		// as follows
 		// kr := &KnativeRevision{
-		// 	Project:           gm.project,
-		// 	Location:          gm.location,
-		// 	ClusterName:       gm.cluster,
-		// 	NamespaceName:     "testNamespace",
-		// 	ServiceName:       "testService",
-		// 	ConfigurationName: "testConfig",
-		// 	RevisionName:      "testRev",
+		// 	// The first three resource labels are from metadata.
+		// 	Project:     gm.project,
+		// 	Location:    gm.location,
+		// 	ClusterName: gm.cluster,
+		// 	// The rest resource labels are from metrics labels.
+		// 	NamespaceName:     getResourceLabelValue(metricskey.LabelNamespaceName, tags),
+		// 	ServiceName:       getResourceLabelValue(metricskey.LabelServiceName, tags),
+		// 	ConfigurationName: getResourceLabelValue(metricskey.LabelConfigurationName, tags),
+		// 	RevisionName:      getResourceLabelValue(metricskey.LabelRevisionName, tags),
 		// }
 
-		return tags, gkeContainer
+		var newTags []tag.Tag
+		for _, t := range tags {
+			// Keep the metrics labels that are not resource labels
+			fmt.Println(t.Key.Name() + ":" + t.Value)
+			if _, ok := metricskey.KnativeRevisionLabels[t.Key.Name()]; !ok {
+				newTags = append(newTags, t)
+			}
+		}
+
+		// return newTags, kr
+		return newTags, gkeContainer
 	}
+}
+
+func getResourceLabelValue(key string, tags []tag.Tag) string {
+	for _, t := range tags {
+		if t.Key.Name() == key {
+			return t.Value
+		}
+	}
+	return metricskey.ValueUnknown
 }
 
 func getGlobalMonitoredResource() func(v *view.View, tags []tag.Tag) ([]tag.Tag, monitoredresource.Interface) {
@@ -116,14 +132,8 @@ func getGlobalMonitoredResource() func(v *view.View, tags []tag.Tag) ([]tag.Tag,
 
 func newStackdriverExporter(config *metricsConfig, logger *zap.SugaredLogger) (view.Exporter, error) {
 	e, err := stackdriver.NewExporter(stackdriver.Options{
-		ProjectID:    config.stackdriverProjectID,
-		MetricPrefix: config.domain + "/" + config.component,
-		// Resource: &monitoredrespb.MonitoredResource{
-		// 	Type: "global",
-		// },
-
-		// MonitoredResource:       &gkeContainer,
-
+		ProjectID:               config.stackdriverProjectID,
+		MetricPrefix:            config.domain + "/" + config.component,
 		GetMonitoredResource:    getMonitoredResourceFunc,
 		DefaultMonitoringLabels: &stackdriver.Labels{},
 	})
@@ -172,10 +182,8 @@ func setMonitoredResourceFunc(config *metricsConfig) {
 		gm := retrieveGCPMetadata()
 		fmt.Println("metrics prefix", config.domain+"/"+config.component)
 		if _, ok := metricskey.KnativeRevisionMetricsPrefixes[config.domain+"/"+config.component]; ok {
-			fmt.Println("path 1")
 			getMonitoredResourceFunc = getKnativeRevisionMonitoredResource(gm)
 		} else {
-			fmt.Println("path 2")
 			getMonitoredResourceFunc = getGlobalMonitoredResource()
 		}
 	}
